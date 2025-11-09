@@ -814,7 +814,7 @@ def upload_file():
  
 @app.route("/get_dataframe_columns", methods=["POST"])
 def get_dataframe_columns():
-    global group, category, item, ing_ship
+    global group, category, item, ship
     req = request.json or {}
     groupBy = req.get("groupBy")
 
@@ -822,7 +822,7 @@ def get_dataframe_columns():
         "Group": group,
         "Category": category,
         "Item": item,
-        "Ingredient/Shipment": ing_ship
+        "Shipment": ship
     }
 
     df = df_map.get(groupBy)
@@ -836,7 +836,7 @@ def get_dataframe_columns():
 
 @app.route("/plot", methods=["POST"])
 def plot():
-    global group, category, item, ing_ship
+    global group, category, item, ship
     req = request.json or {}
     x = req.get("x")
     y = req.get("y")
@@ -847,7 +847,7 @@ def plot():
         "Group": group,
         "Category": category,
         "Item": item,
-        "Ingredient/Shipment": ing_ship
+        "Ingredient/Shipment": ship
     }
 
     df_temp = df_map.get(groupBy)
