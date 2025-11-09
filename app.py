@@ -20,6 +20,7 @@ from collections import Counter
 from collections import defaultdict
 
 
+
 app = Flask(__name__)
 CORS(app)
 
@@ -668,6 +669,145 @@ HTML_TEMPLATE = """
         );
     };
     
+    
+    // Revenue Prediction Tab
+    const RevenuePrediction = () => {
+        const [plotType, setPlotType] = usePersistentState("plotType", "bar");
+        const [predictionResults, setPredictionResults] = usePersistentState("predictionResults", null);
+        const [loading, setLoading] = useState(false);
+        const [note, setNote] = useState("");
+
+        const handleRunPrediction = async () => {
+            setLoading(true);
+            setPredictionResults(null);
+            setNote("");
+
+            try {
+                const response = await fetch("/predict_revenue_stepwise", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ plot_type: plotType }),
+                });
+
+                const data = await response.json();
+                if (!response.ok || data.error) {
+                    setNote("Error: " + (data.error || "Unknown error"));
+                    return;
+                }
+
+                setPredictionResults(data);
+                setNote(data.note || "Revenue prediction completed successfully!");
+            } catch (e) {
+                console.error("Prediction error:", e);
+                setNote("An unexpected error occurred during prediction.");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        return (
+            <div>
+                <h2>Revenue Prediction</h2>
+                <p>Forecasts expected revenue for the future months.</p>
+
+                <div style={{ marginBottom: 15, display: "flex", gap: "20px", alignItems: "center" }}>
+                    <div>
+                        <label>Plot Type: </label>
+                        <select value={plotType} onChange={(e) => setPlotType(e.target.value)}>
+                            <option value="bar">Bar Plot</option>
+                            <option value="line">Line Plot</option>
+                        </select>
+                    </div>
+
+                    <button onClick={handleRunPrediction} disabled={loading}>
+                        {loading ? "Running..." : "Run Prediction"}
+                    </button>
+                </div>
+
+                {note && (
+                    <div style={{ color: predictionResults?.error ? "red" : "black", marginBottom: 15 }}>
+                        <strong>{note}</strong>
+                    </div>
+                )}
+
+                {predictionResults && (
+                    <div style={{ marginTop: 20 }}>
+                        <h3>Prediction Metrics</h3>
+                        <div style={{ display: "flex", gap: "40px", marginBottom: "20px" }}>
+                            <div>
+                                <strong>MSE:</strong>{" "}
+                                {predictionResults.mse !== "N/A"
+                                    ? predictionResults.mse.toFixed(4)
+                                    : "N/A"}
+                            </div>
+                            <div>
+                                <strong>Variance:</strong>{" "}
+                                {predictionResults.variance !== "N/A"
+                                    ? predictionResults.variance.toFixed(4)
+                                    : "N/A"}
+                            </div>
+                            <div>
+                                <strong>Explained Variance (R²):</strong>{" "}
+                                {predictionResults.explained_variance !== "N/A"
+                                    ? predictionResults.explained_variance.toFixed(4)
+                                    : "N/A"}
+                            </div>
+                        </div>
+
+                        {/* Results Table */}
+                        {predictionResults.table && predictionResults.table.length > 0 && (
+                            <div style={{ marginTop: 20 }}>
+                                <h3>Predicted vs Actual Values</h3>
+                                <table
+                                    style={{
+                                        borderCollapse: "collapse",
+                                        width: "100%",
+                                        textAlign: "center",
+                                        marginBottom: 20,
+                                    }}
+                                >
+                                    <thead>
+                                        <tr>
+                                            <th>Month</th>
+                                            <th>Predicted</th>
+                                            <th>Actual</th>
+                                            <th>MSE</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {predictionResults.table.map((row, idx) => (
+                                            <tr key={idx}>
+                                                <td>{row.Month}</td>
+                                                <td>{row.Predicted ? row.Predicted.toFixed(2) : ""}</td>
+                                                <td>{row.Actual ? row.Actual.toFixed(2) : ""}</td>
+                                                <td>
+                                                    {row.MSE && !isNaN(row.MSE)
+                                                        ? row.MSE.toFixed(2)
+                                                        : ""}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {predictionResults.image && (
+                            <div style={{ marginTop: 10 }}>
+                                <img
+                                    src={`data:image/png;base64,${predictionResults.image}`}
+                                    alt="Revenue Prediction Plot"
+                                    style={{ maxWidth: "800px" }}
+                                />
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    };
+    
+    
     // Shipment vs. Usage Tab
     const ShipmentVsUsage = () => {
         const [selectedMonth, setSelectedMonth] = usePersistentState("shipmentVsUsage_selectedMonth", "");
@@ -1132,6 +1272,7 @@ HTML_TEMPLATE = """
               <button onClick={() => setActiveTab("Graphing")}>Graphing</button>
               <button onClick={() => setActiveTab("NextMonthUsage")}>Next Month Usage</button>
               <button onClick={() => setActiveTab("CostPrediction")}>Cost Prediction</button>
+              <button onClick={() => setActiveTab("RevenuePrediction")}>Revenue Prediction</button>
               <button onClick={() => setActiveTab("ShipmentVsUsage")}>Shipment vs. Usage</button>
               <button onClick={() => setActiveTab("UsedShippedTimeline")}>Used/Shipped Timeline</button>
               <button onClick={() => setActiveTab("Bestsellers")}>Bestsellers</button>
@@ -1155,6 +1296,9 @@ HTML_TEMPLATE = """
             )}
             {activeTab === "CostPrediction" && (
               <CostPrediction columnNames={columnNames} modelBuilt={modelBuilt} modelTargets={modelTargets} />
+            )}
+            {activeTab === "RevenuePrediction" && (
+              <RevenuePrediction columnNames={columnNames} modelBuilt={modelBuilt} modelTargets={modelTargets} />
             )}
             {activeTab === "ShipmentVsUsage" && (
                 <ShipmentVsUsage columnNames={columnNames} modelBuilt={modelBuilt} modelTargets={modelTargets} />
@@ -1459,6 +1603,7 @@ def predict_next_month_usage():
         "may": 5, "june": 6, "july": 7, "aug": 8, "sept": 9, "oct": 10, "nov": 11
     }
     month_num = month_map.get(month_to_predict_str.lower())
+    prev_month = month_num - 1
     
     # Map selected month string to actual month name in the dataset (for test_df lookup)
     month_actual_name_map = {
@@ -1646,6 +1791,7 @@ def predict_next_month_usage():
                 X_test = X_test.reindex(columns=final_model.model.exog_names, fill_value=0.0).astype(float)
                 
                 preds = final_model.predict(X_test)
+                
                 
                 # Clip predictions to training range
                 preds = preds.clip(lower=y_train_min, upper=y_train_max)
@@ -2043,6 +2189,301 @@ def predict_cost_loocv():
         "coefficient_table": coefficient_table # <-- NEW TABLE DATA
     })
     
+ 
+
+
+from flask import jsonify, request
+import pandas as pd
+import numpy as np
+import io, base64
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.metrics import mean_squared_error
+import statsmodels.api as sm
+import re 
+
+@app.route("/predict_revenue_stepwise", methods=["POST"])
+def predict_revenue_stepwise():
+    global item
+
+    try:
+        if item is None or item.empty:
+            return jsonify({"error": "Item data not loaded."}), 400
+
+        req = request.json or {}
+        plot_type_str = req.get("plot_type", "bar")
+
+        # --- Normalize & prepare data ---
+        df_temp = item.copy()
+        df_temp.columns = df_temp.columns.map(lambda x: str(x).strip().lower())
+
+        if 'amount' not in df_temp.columns or 'month' not in df_temp.columns:
+            return jsonify({"error": "Item dataset missing 'Amount' or 'Month' columns."}), 400
+
+        # --- Month mapping ---
+        month_map = {
+            "may": 5, "june": 6, "jun": 6,
+            "july": 7, "jul": 7,
+            "august": 8, "aug": 8,
+            "september": 9, "sept": 9, "sep": 9,
+            "october": 10, "oct": 10,
+            "november": 11, "nov": 11,
+        }
+        reverse_month_map = {v: k.capitalize() for k, v in month_map.items() if v < 11}
+
+        df_temp["month_num"] = df_temp["month"].astype(str).str.lower().map(month_map)
+        df_temp = df_temp.dropna(subset=["month_num"])
+
+        # --- Aggregate Amount by month ---
+        monthly_revenue = (
+            df_temp.groupby("month_num")["amount"]
+            .sum()
+            .reset_index()
+            .sort_values("month_num")
+            .reset_index(drop=True)
+        )
+
+        # Determine the first two numerical months in the data
+        if not monthly_revenue.empty:
+            first_month_num = monthly_revenue["month_num"].iloc[0]
+            second_month_num = first_month_num + 1
+        else:
+            first_month_num = 5
+            second_month_num = 6 # Default fallback
+
+        # Fill missing months (May–Nov)
+        all_months = pd.DataFrame({"month_num": range(first_month_num, 11)}) # Go up to Nov (11)
+        monthly_revenue = (
+            all_months.merge(monthly_revenue, on="month_num", how="left")
+            .fillna({"amount": 0})
+        )
+        monthly_revenue["month"] = monthly_revenue["month_num"].map(lambda x: reverse_month_map.get(x, f"Nov"))
+
+
+        # --- Prepare modeling data ---
+        data = monthly_revenue.copy()
+        data["amount"] = data["amount"].astype(float)
+        data["month_sq"] = data["month_num"] ** 2
+        data["month_cu"] = data["month_num"] ** 3
+
+        # --- Run stepwise model ---
+        def stepwise_selection(data, response, direction="both", criterion="AIC"):
+            # ... (Stepwise selection logic remains the same) ...
+            included = []
+            predictors = [col for col in data.columns if col not in [response, "month"]]
+            changed = True
+
+            while changed:
+                changed = False
+                # Forward step
+                excluded = list(set(predictors) - set(included))
+                aic_scores = pd.Series(dtype=float)
+                for new_col in excluded:
+                    formula = f"{response} ~ {' + '.join(included + [new_col]) if included else new_col}"
+                    model = sm.OLS.from_formula(formula, data).fit()
+                    aic_scores.loc[new_col] = model.aic
+
+                if not aic_scores.empty:
+                    best_candidate = aic_scores.idxmin()
+                    best_aic = aic_scores.min()
+                    if included:
+                        current_aic = sm.OLS.from_formula(f"{response} ~ {' + '.join(included)}", data).fit().aic
+                    else:
+                        current_aic = float("inf")
+
+                    if best_aic + 1e-4 < current_aic:
+                        included.append(best_candidate)
+                        changed = True
+
+                # Backward step
+                if direction in ("both", "backward") and included:
+                    aics = pd.Series(dtype=float)
+                    for col in included:
+                        subset = list(set(included) - {col})
+                        if subset:
+                            formula = f"{response} ~ {' + '.join(subset)}"
+                            model = sm.OLS.from_formula(formula, data).fit()
+                            aics.loc[col] = model.aic
+                        else:
+                            aics.loc[col] = float("inf")
+
+                    worst_candidate = aics.idxmin()
+                    worst_aic = aics.min()
+                    current_aic = sm.OLS.from_formula(f"{response} ~ {' + '.join(included)}", data).fit().aic
+
+                    if worst_aic + 1e-4 < current_aic:
+                        included.remove(worst_candidate)
+                        changed = True
+
+            final_formula = f"{response} ~ {' + '.join(included)}" if included else f"{response} ~ 1"
+            model = sm.OLS.from_formula(final_formula, data).fit()
+            model.selected_features = included
+            return model
+
+        # Run model on ALL existing data points (May - Oct)
+        model = stepwise_selection(data[data["amount"].notna()], "amount", direction="both", criterion="AIC")
+
+        # --- Predict and Apply Exclusion (FIXED) ---
+        data["predicted"] = model.predict(data)
+        
+        # FIX 1: Exclude predictions for the first two months numerically (e.g., May=5, June=6)
+        data.loc[data["month_num"].isin([first_month_num, second_month_num]), "predicted"] = np.nan
+
+        # --- Add Previous Month Amount for Clipping ---
+        # Create a shifted column to hold the previous month's actual amount
+        data['prev_amount'] = data['amount'].shift(1)
+        
+        # --- Forecast next month safely ---
+        
+        # Get the highest month number currently available in the dataset
+        last_observed_month_num = data[data["amount"].notna()]["month_num"].max()
+        
+        next_month_num = last_observed_month_num + 1
+        next_month_label = reverse_month_map.get(next_month_num, f"Nov")
+
+        # Create new_row with the same predictors the model expects
+        predictors = model.model.exog_names
+        predictors = [p for p in predictors if p != "Intercept"]
+        new_row = pd.DataFrame({
+            "month_num": [next_month_num],
+            "month_sq": [next_month_num ** 2],
+            "month_cu": [next_month_num ** 3],
+        })
+
+        new_row = new_row[[col for col in predictors if col in new_row.columns]]
+        new_row = sm.add_constant(new_row, has_constant="add")
+
+        next_pred = float(model.predict(new_row)[0])
+        
+        # Determine clipping bounds for the forecast (based on the last observed amount)
+        last_amount = data.loc[data['month_num'] == last_observed_month_num, 'amount'].iloc[0]
+        lower_bound = last_amount * 0.95
+        upper_bound = last_amount * 1.05
+        
+        # FIX 3: Apply clipping to the forecast
+        next_pred_clipped = np.clip(next_pred, lower_bound, upper_bound)
+        
+        forecast_row = pd.DataFrame({
+            "month_num": [next_month_num],
+            "month": [next_month_label],
+            "amount": [np.nan],
+            "predicted": [next_pred_clipped] # Use the clipped value
+        })
+        data = pd.concat([data, forecast_row], ignore_index=True)
+
+
+        # --- Apply Clipping to Historical Predictions (In-Sample Predictions) ---
+        # Clip all predictions from the third month onwards (where a prev_amount exists)
+        for i in range(len(data)):
+            month_n = data.loc[i, 'month_num']
+            
+            # Skip the first two months and the final forecast row
+            if month_n > second_month_num and month_n <= last_observed_month_num:
+                
+                # Get previous month's amount (actual)
+                prev_month_amount = data.loc[data['month_num'] == month_n - 1, 'amount'].iloc[0]
+                
+                if not np.isnan(prev_month_amount):
+                    pred_val = data.loc[i, 'predicted']
+                    lower_b = prev_month_amount * 0.95
+                    upper_b = prev_month_amount * 1.05
+                    data.loc[i, 'predicted'] = np.clip(pred_val, lower_b, upper_b)
+
+
+        # --- Metrics (Exclude first two months, include Nov only for plotting) ---
+        
+        mask_eval = data["month_num"] > second_month_num
+        
+        actual_eval = data.loc[mask_eval & data["amount"].notna(), "amount"]
+        pred_eval = data.loc[mask_eval & data["predicted"].notna(), "predicted"]
+        
+        common_index = actual_eval.index.intersection(pred_eval.index)
+        actual_eval = actual_eval.loc[common_index]
+        pred_eval = pred_eval.loc[common_index]
+
+        if len(actual_eval) == len(pred_eval) and len(actual_eval) > 0:
+            avg_mse = mean_squared_error(actual_eval, pred_eval)
+            avg_var = np.var(actual_eval)
+            explained_var = 1 - (avg_mse / avg_var) if avg_var > 0 else 0.0
+        else:
+            avg_mse = avg_var = explained_var = "N/A"
+
+        # --- Plot (FIXED to be dynamic) ---
+        plt.figure(figsize=(10, 6))
+        
+        # Prepare data for plotting (melted form is needed for bar, but lineplot can use wide form)
+        
+        if plot_type_str == "line": # FIX: Match frontend value "line"
+            # Ensure line plot handles the concatenated data frame correctly
+            sns.lineplot(data=data, x="month", y="amount", marker="o", label="Actual")
+            sns.lineplot(data=data, x="month", y="predicted", marker="x", linestyle="--", label="Predicted")
+            plot_title = "Revenue Timeline: Actual vs Predicted"
+        else: # Default or "bar"
+            data_melted = pd.melt(
+                data, 
+                id_vars='month', 
+                value_vars=['amount', 'predicted'],
+                var_name='Type',
+                value_name='Amount'
+            ).rename(columns={'amount': 'Actual', 'predicted': 'Predicted'})
+            
+            data_melted['Type'] = data_melted['Type'].replace({'amount': 'Actual', 'predicted': 'Predicted'})
+            
+            data_melted.loc[(data_melted['month'] == next_month_label) & (data_melted['Type'] == 'Actual'), 'Amount'] = np.nan
+            
+            sns.barplot(
+                data=data_melted, 
+                x="month", 
+                y="Amount", 
+                hue="Type"
+            )
+            plot_title = "Revenue Bar Chart: Actual vs Predicted"
+            
+        plt.title(plot_title, fontsize=14)
+        plt.xlabel("Month")
+        plt.ylabel("Amount")
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png")
+        buf.seek(0)
+        img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+        buf.close()
+        plt.close("all")
+
+        # --- Table output ---
+        # ... (Table generation logic remains the same, but using the correctly evaluated data) ...
+        mse_list = []
+        for _, row in data.iterrows():
+            if not np.isnan(row["predicted"]) and not np.isnan(row["amount"]) and row["month_num"] > second_month_num:
+                mse_list.append((row["predicted"] - row["amount"]) ** 2)
+            else:
+                mse_list.append(np.nan)
+
+        table_df = pd.DataFrame({
+            "Month": data["month"],
+            "Predicted": data["predicted"],
+            "Actual": data["amount"],
+            "MSE": mse_list
+        })
+
+        return jsonify({
+            "mse": avg_mse,
+            "variance": avg_var,
+            "explained_variance": explained_var,
+            "image": img_b64,
+            "table": table_df.fillna("").to_dict(orient="records"),
+            "note": f"Stepwise regression with AIC (both directions). {reverse_month_map.get(first_month_num)} and {reverse_month_map.get(second_month_num)} excluded.",
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Stepwise regression failed: {str(e)}"}), 500
+
+
+
+    
+    
 
 def normalize_text(s):
     """Normalizes text by removing non-alphanumeric chars and converting to lowercase."""
@@ -2053,7 +2494,6 @@ def normalize_text(s):
         return s
     return s
 
-# --- Endpoints ---
 
 @app.route("/get_unique_months")
 def get_unique_months():
