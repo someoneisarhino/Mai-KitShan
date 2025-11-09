@@ -16,6 +16,7 @@ import numpy as np
 import os
 import io
 import base64
+from collections import Counter
 
 
 
@@ -53,7 +54,7 @@ HTML_TEMPLATE = """
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MSY Dashboard</title>
+  <title>Mai KitShan</title>
   <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -771,6 +772,160 @@ HTML_TEMPLATE = """
             </div>
         );
     };
+    
+    // Bestsellers Tab
+    const Bestsellers = () => {
+        const [selectedMonth, setSelectedMonth] = React.useState("");
+        const [monthOptions, setMonthOptions] = React.useState([]);
+        const [imgUrl, setImgUrl] = React.useState("");
+        const [note, setNote] = React.useState("");
+        const [loading, setLoading] = React.useState(false);
+        const [ingredientTable, setIngredientTable] = React.useState([]); // State for the ingredient breakdown table
+        const [frequencyTable, setFrequencyTable] = React.useState([]); // <-- NEW STATE FOR FREQUENCY
+
+        // --- Fetch unique months on load (unchanged) ---
+        React.useEffect(() => {
+            fetch("/get_unique_months")
+                .then((r) => r.json())
+                .then((data) => {
+                    setMonthOptions(data.months || []);
+                })
+                .catch((e) => console.error("Error fetching months:", e));
+        }, []);
+
+        const handleGenerateChart = async () => {
+            setLoading(true);
+            setImgUrl("");
+            setNote("");
+            setIngredientTable([]);
+            setFrequencyTable([]); // <-- Reset frequency table
+
+            try {
+                const response = await fetch("/bestsellers_plot", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ month: selectedMonth }), 
+                });
+
+                if (!response.ok) {
+                    const txt = await response.text();
+                    setNote("Chart Error: " + txt);
+                    return;
+                }
+
+                const data = await response.json();
+
+                if (data.error) {
+                    setNote("Error: " + data.error);
+                    return;
+                }
+                
+                if (data.image) {
+                    setImgUrl("data:image/png;base64," + data.image);
+                    setNote(data.note || "Chart generated successfully.");
+                    setIngredientTable(data.ingredient_table || []); 
+                    setFrequencyTable(data.frequency_table || []); // <-- SAVE NEW FREQUENCY DATA
+                }
+
+            } catch (e) {
+                console.error("Plotting error:", e);
+                setNote("An unexpected error occurred during plotting.");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        return (
+            <div>
+                <h2>Bestsellers Analysis</h2>
+                
+                {/* ... (Month selection and chart display remain the same) ... */}
+
+                <div style={{ marginBottom: 15 }}>
+                    <label>Month: </label>
+                    <select 
+                        value={selectedMonth} 
+                        onChange={(e) => setSelectedMonth(e.target.value)}
+                    >
+                        <option value="">--All Months--</option> {/* Optional value */}
+                        {monthOptions.map((month) => (
+                            <option key={month} value={month}>
+                                {month}
+                            </option>
+                        ))}
+                    </select>
+
+                    <button 
+                        onClick={handleGenerateChart} 
+                        disabled={loading}
+                        style={{ marginLeft: 10 }}
+                    >
+                        {loading ? "Generating..." : "Generate Chart"}
+                    </button>
+                </div>
+
+                {note && (
+                    <div style={{ color: "darkblue", marginBottom: 15 }}>
+                        <strong>{note}</strong>
+                    </div>
+                )}
+
+                {imgUrl && (
+                    <div style={{ marginTop: 20 }}>
+                        <img src={imgUrl} alt="Top 10 Bestsellers Plot" style={{ maxWidth: "100%" }} />
+                    </div>
+                )}
+
+                {/* Existing Ingredient Breakdown Table */}
+                {ingredientTable.length > 0 && (
+                    <div style={{ marginTop: 40, width: '100%' }}>
+                        <h3>Ingredient Breakdown for Top Sellers</h3>
+                        <table style={{ borderCollapse: 'collapse', width: '100%', border: '1px solid #ddd' }}>
+                            <thead>
+                                <tr style={{ backgroundColor: '#f2f2f2' }}>
+                                    <th style={{ border: '1px solid #ddd', padding: '8px', width: '30%' }}>Food Item</th>
+                                    <th style={{ border: '1px solid #ddd', padding: '8px', width: '70%' }}>Ingredients Used</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {ingredientTable.map((row, index) => (
+                                    <tr key={index}>
+                                        <td style={{ border: '1px solid #ddd', padding: '8px' }}>{row['Food Item']}</td>
+                                        <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                                            {row.Ingredients.join(', ')}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+                
+                {/* NEW: Ingredient Frequency Table */}
+                {frequencyTable.length > 0 && (
+                    <div style={{ marginTop: 40, width: '100%' }}>
+                        <h3>Ingredient Frequency in Top Sellers</h3>
+                        <table style={{ borderCollapse: 'collapse', width: '35%', border: '1px solid #ddd' }}>
+                            <thead>
+                                <tr style={{ backgroundColor: '#e6e6fa' }}>
+                                    <th style={{ border: '1px solid #ddd', padding: '8px' }}>Ingredient</th>
+                                    <th style={{ border: '1px solid #ddd', padding: '8px' }}>Frequency</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {frequencyTable.map((row, index) => (
+                                    <tr key={index}>
+                                        <td style={{ border: '1px solid #ddd', padding: '8px' }}>{row.Ingredient}</td>
+                                        <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>{row.Frequency}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+        );
+    };
 
 
     // Application
@@ -800,6 +955,7 @@ HTML_TEMPLATE = """
               <button onClick={() => setActiveTab("NextMonthUsage")}>Next Month Usage</button>
               <button onClick={() => setActiveTab("ShipmentVsUsage")}>Shipment vs. Usage</button>
               <button onClick={() => setActiveTab("UsedShippedTimeline")}>Used/Shipped Timeline</button>
+              <button onClick={() => setActiveTab("Bestsellers")}>Bestsellers</button>
             </div>
             <div>
               {/* could show modelBuilt indicator */}
@@ -823,6 +979,9 @@ HTML_TEMPLATE = """
             )}
             {activeTab === "UsedShippedTimeline" && (
                 <UsedShippedTimeline columnNames={columnNames} modelBuilt={modelBuilt} modelTargets={modelTargets} />
+            )}
+            {activeTab === "Bestsellers" && (
+                <Bestsellers columnNames={columnNames} modelBuilt={modelBuilt} modelTargets={modelTargets} />
             )}
           </div>
         </div>
@@ -1802,7 +1961,123 @@ def used_shipped_timeline_plot():
         }), 500
 
 
+@app.route("/bestsellers_plot", methods=["POST"])
+def bestsellers_plot():
+    global item
 
+    INGREDIENT_CONVERSION_MAP = {
+        "braisedbeefusedg": "beef", 
+        "braisedchickeng": "chicken", 
+        "eggcount": "egg", 
+        "riceg": "rice", 
+        "ramencount": "ramen", 
+        "ricenoodlesg": "rice noodles", 
+        "chickenthighpcs": "chicken", 
+        "chickenwingspcs": "chicken wings", 
+        "flourg": "flour", 
+        "greenonion": "green onion", 
+        "cilantro": "cilantro", 
+        "whiteonion": "white onion", 
+        "peasg": "peas and carrot", 
+        "bokchoyg": "bokchoy", 
+        "tapiocastarch": "tapioca starch"
+    }
+    
+    if item is None or item.empty:
+        return jsonify({"error": "Item data not loaded."}), 400
+
+    req = request.json or {}
+    selected_month = req.get("month")
+
+    # --- 1. Data Preparation and Filtering (omitted for brevity) ---
+    # ... (code to filter df_filtered, df_top_10, and top_item_names remains the same) ...
+
+    df_temp = item.copy()
+    col_name_map = {col: normalize_text(col) for col in item.columns}
+    df_temp.columns = df_temp.columns.map(col_name_map)
+    
+    if selected_month:
+        month_col = 'month'
+        month_filter = df_temp[month_col].astype(str).str.strip() == selected_month.strip()
+        df_filtered = df_temp[month_filter].copy()
+    else:
+        df_filtered = df_temp.copy()
+
+    df_filtered['amount'] = pd.to_numeric(df_filtered['amount'], errors='coerce').fillna(0)
+    df_grouped = df_filtered.groupby('itemname')['amount'].sum().reset_index()
+    df_top_10 = df_grouped.sort_values(by='amount', ascending=False).head(10).copy()
+    
+    if df_top_10.empty:
+        return jsonify({"error": "No data available to determine top sellers."}), 400
+    
+    top_item_names = df_top_10['itemname'].tolist()
+    df_ingredients = df_filtered[df_filtered['itemname'].isin(top_item_names)].copy()
+    
+    # --- 3. Ingredient Analysis for Top 10 Items ---
+    
+    ingredient_data = []
+    all_bestseller_ingredients = [] # <-- NEW LIST TO TRACK ALL INGREDIENTS
+
+    for item_name in top_item_names:
+        df_item = df_ingredients[df_ingredients['itemname'] == item_name].copy()
+        item_ingredients = []
+
+        for ingredient_col in INGREDIENT_CONVERSION_MAP.keys():
+            if ingredient_col in df_item.columns:
+                total_usage = pd.to_numeric(df_item[ingredient_col], errors='coerce').fillna(0).sum()
+                
+                if total_usage > 0:
+                    display_name = INGREDIENT_CONVERSION_MAP[ingredient_col].capitalize()
+                    item_ingredients.append(display_name)
+                    all_bestseller_ingredients.append(display_name) # <-- ADD TO FREQUENCY LIST
+        
+        if item_ingredients:
+            ingredient_data.append({
+                'Food Item': item_name,
+                'Ingredients': item_ingredients
+            })
+
+    # --- 4. Ingredient Frequency Calculation (NEW) ---
+    
+    # Use Counter to get frequencies
+    ingredient_counts = Counter(all_bestseller_ingredients)
+    
+    # Convert to list of dictionaries for JSON output
+    # Sort by frequency descending
+    frequency_table_data = [
+        {'Ingredient': ing, 'Frequency': count} 
+        for ing, count in ingredient_counts.most_common()
+    ]
+
+    # --- 5. Plot Generation (omitted for brevity) ---
+    
+    plt.figure(figsize=(12, 6))
+    order_list = df_top_10['itemname'].tolist()
+    sns.barplot(data=df_top_10, x='itemname', y='amount', order=order_list, palette='viridis')
+    plt.title(f"Top 10 Bestselling Food Items (Filter: {selected_month if selected_month else 'All Months'})", fontsize=14)
+    plt.xlabel("Food Item", fontsize=12)
+    plt.ylabel("Total Amount ($)", fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', linestyle='--', alpha=0.6)
+    plt.tight_layout()
+
+    # Encoding plot to base64
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+    buf.close()
+    plt.close("all")
+
+    # --- 6. Final Response ---
+    
+    return jsonify({
+        "image": img_b64,
+        "note": f"Top 10 bestsellers generated for {selected_month if selected_month else 'All Months'}.",
+        "ingredient_table": ingredient_data,
+        "frequency_table": frequency_table_data # <-- NEW DATA FIELD
+    })
+    
 
 if __name__ == "__main__":
     app.run(debug=True, port = 5001)
