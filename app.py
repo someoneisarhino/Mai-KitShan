@@ -17,6 +17,7 @@ import os
 import io
 import base64
 from collections import Counter
+from collections import defaultdict
 
 
 
@@ -41,6 +42,32 @@ split_after_date = None
 last_isolate_by = None
 last_isolate_value = None
 LB_TO_GRAM = 453.592
+TARGETS_INGREDIENTS = [
+    "braisedbeefusedg", "braisedchickeng", "braisedporkg", "eggcount", 
+    "riceg", "ramencount", "ricenoodlesg", "chickenthighpcs", 
+    "chickenwingspcs", "flourg", "picklecabbage", "greenonion", 
+    "cilantro", "whiteonion", "peasg", "carrotg", "bokchoyg", "tapiocastarch"
+]
+INGREDIENT_DISPLAY_MAP = {
+    "braisedbeefusedg": "Braised Beef", 
+    "braisedchickeng": "Braised Chicken", 
+    "braisedporkg": "Braised Pork", 
+    "eggcount": "Egg", 
+    "riceg": "Rice", 
+    "ramencount": "Ramen", 
+    "ricenoodlesg": "Rice Noodles", 
+    "chickenthighpcs": "Chicken Thigh", 
+    "chickenwingspcs": "Chicken Wings", 
+    "flourg": "Flour", 
+    "greenonion": "Green Onion", 
+    "cilantro": "Cilantro", 
+    "whiteonion": "White Onion", 
+    "peasg": "Peas",
+    "carrotg": "Carrot",
+    "bokchoyg": "Bok Choy", 
+    "tapiocastarch": "Tapioca Starch",
+    "picklecabbage": "Pickled Cabbage"
+}
 
 
 
@@ -484,6 +511,136 @@ HTML_TEMPLATE = """
                                 <img src={imgUrl} alt="Actual vs Predicted Usage" style={{ maxWidth: "100%" }} />
                             </div>
                         )}
+                    </div>
+                )}
+            </div>
+        );
+    };
+    
+
+    // Cost Prediction Tab
+    const CostPrediction = () => {
+        const [predictionResults, setPredictionResults] = React.useState(null);
+        const [loading, setLoading] = React.useState(false);
+        const [imgUrl, setImgUrl] = React.useState("");
+        const [note, setNote] = React.useState("");
+        const [coefficientTable, setCoefficientTable] = React.useState([]); // NEW: State for coefficient table
+
+        const handleRunPrediction = async () => {
+            setLoading(true);
+            setPredictionResults(null);
+            setImgUrl("");
+            setNote("");
+            setCoefficientTable([]); // Reset table data
+
+            try {
+                const response = await fetch("/predict_cost_loocv", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" }
+                });
+
+                if (!response.ok) {
+                    const txt = await response.text();
+                    setNote("Prediction Error: " + txt);
+                    return;
+                }
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    setNote("Error: " + data.error);
+                    return;
+                }
+                
+                if (data.image) {
+                    setImgUrl("data:image/png;base64," + data.image);
+                }
+                
+                setPredictionResults(data);
+                setNote(data.note || "Cost prediction completed successfully!");
+                setCoefficientTable(data.coefficient_table || []); // SAVE NEW COEFFICIENT DATA
+
+            } catch (e) {
+                console.error("Cost prediction error:", e);
+                setNote("An unexpected error occurred during prediction.");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        return (
+            <div>
+                <h2>Cost Prediction</h2>
+                <p>
+                    Metrics displayed are aggregated across all predicted data points.
+                </p>
+
+                <button 
+                    onClick={handleRunPrediction} 
+                    disabled={loading}
+                    style={{ marginTop: 15, marginBottom: 25 }}
+                >
+                    {loading ? "Training and Predicting..." : "Run Cost Prediction"}
+                </button>
+
+                {note && (
+                    <div style={{ color: predictionResults?.error ? "red" : "black", marginBottom: 15 }}>
+                        <strong>{note}</strong>
+                    </div>
+                )}
+
+                {predictionResults && (
+                    <div style={{ marginTop: 20 }}>
+                        <h3>Aggregate Prediction Metrics</h3>
+                        {/* ... (Metrics Display remains the same) ... */}
+                        <p>
+                            <strong>Total Mean Squared Error (MSE):</strong> {typeof predictionResults.mse === "number" ? predictionResults.mse.toFixed(4) : predictionResults.mse || 'N/A'}
+                        </p>
+                        <p>
+                            <strong>Total Variance of Actual Cost:</strong> {typeof predictionResults.variance === "number" ? predictionResults.variance.toFixed(4) : predictionResults.variance || 'N/A'}
+                        </p>
+                        <p>
+                            <strong>Explained Variance (R²):</strong> {typeof predictionResults.explained_variance === "number" ? predictionResults.explained_variance.toFixed(4) : predictionResults.explained_variance || 'N/A'}
+                        </p>
+                        
+                        {imgUrl && (
+                            <div style={{ marginTop: 20 }}>
+                                <img src={imgUrl} alt="Actual vs Predicted Cost Scatter Plot" style={{ maxWidth: "600px" }} />
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* NEW COEFFICIENT TABLE DISPLAY */}
+                {coefficientTable.length > 0 && (
+                    <div style={{ marginTop: 40 }}>
+                        <h3>Ingredients Ranked by Cost Influence</h3>
+                        <table style={{ borderCollapse: 'collapse', width: '45%', minWidth: '300px', border: '1px solid #ddd' }}>
+                            <thead>
+                                <tr style={{ backgroundColor: '#e6f7ff' }}>
+                                    <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'left' }}>Ingredient</th>
+                                    <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'right' }}>Coefficient</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {coefficientTable.map((row, index) => (
+                                    <tr key={index}>
+                                        <td style={{ border: '1px solid #ddd', padding: '8px' }}>{row.Ingredient}</td>
+                                        <td 
+                                            style={{ 
+                                                border: '1px solid #ddd', 
+                                                padding: '8px', 
+                                                textAlign: 'right',
+                                                // Optional: Color code based on sign
+                                                color: row.Coefficient > 0 ? 'green' : (row.Coefficient < 0 ? 'red' : 'inherit')
+                                            }}
+                                        >
+                                            {row.Coefficient.toFixed(4)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
             </div>
@@ -953,6 +1110,7 @@ HTML_TEMPLATE = """
               <button onClick={() => setActiveTab("File Upload")}>File Upload</button>
               <button onClick={() => setActiveTab("Graphing")}>Graphing</button>
               <button onClick={() => setActiveTab("NextMonthUsage")}>Next Month Usage</button>
+              <button onClick={() => setActiveTab("CostPrediction")}>Cost Prediction</button>
               <button onClick={() => setActiveTab("ShipmentVsUsage")}>Shipment vs. Usage</button>
               <button onClick={() => setActiveTab("UsedShippedTimeline")}>Used/Shipped Timeline</button>
               <button onClick={() => setActiveTab("Bestsellers")}>Bestsellers</button>
@@ -973,6 +1131,9 @@ HTML_TEMPLATE = """
             )}
             {activeTab === "NextMonthUsage" && (
               <NextMonthUsage columnNames={columnNames} modelBuilt={modelBuilt} modelTargets={modelTargets} />
+            )}
+            {activeTab === "CostPrediction" && (
+              <CostPrediction columnNames={columnNames} modelBuilt={modelBuilt} modelTargets={modelTargets} />
             )}
             {activeTab === "ShipmentVsUsage" && (
                 <ShipmentVsUsage columnNames={columnNames} modelBuilt={modelBuilt} modelTargets={modelTargets} />
@@ -1587,7 +1748,247 @@ def predict_next_month_usage():
     })
 
 
-# --- Helper Functions ---
+
+
+
+@app.route("/predict_cost_loocv", methods=["POST"])
+def predict_cost_loocv():
+    global item # Use the global item DataFrame
+
+    if item is None or item.empty:
+        return jsonify({"error": "Item data not loaded."}), 400
+
+    # ... (Data preparation and aggregation steps remain the same) ...
+    # Assuming df_agg, X_full, y_full, unique_items, ingredient_cols are correctly defined here.
+
+    df_temp = item.copy()
+    col_name_map_forward = {col: normalize_text(col) for col in item.columns}
+    df_pred_base = item.copy()
+    df_pred_base.columns = df_pred_base.columns.map(col_name_map_forward)
+    df_pred_base['cost'] = pd.to_numeric(df_pred_base.get('cost'), errors='coerce').fillna(0)
+    df_pred_base = df_pred_base.dropna(subset=['cost'])
+
+    ingredient_cols = [col for col in TARGETS_INGREDIENTS if col in df_pred_base.columns]
+    
+    if not ingredient_cols:
+        return jsonify({"error": "Ingredient columns not found in dataset after normalization."}), 400
+    
+    df_pred_base['total_ing_usage'] = df_pred_base[ingredient_cols].sum(axis=1)
+    df_filtered = df_pred_base[df_pred_base['total_ing_usage'] > 0].copy()
+    
+    if df_filtered.empty:
+        return jsonify({"error": "No relevant data (cost > 0 AND ingredient usage > 0) found for prediction."}), 400
+
+    food_item_col = 'itemname'
+    if food_item_col not in df_filtered.columns:
+        return jsonify({"error": "Required column 'itemname' not found."}), 400
+        
+    cols_to_aggregate = ['cost'] + ingredient_cols
+    df_agg = df_filtered.groupby(food_item_col)[cols_to_aggregate].mean().reset_index()
+
+    X_full = df_agg[ingredient_cols].copy()
+    y_full = df_agg['cost'].copy()
+    
+    X_means = X_full.mean().to_dict()
+    X_full = X_full.fillna(X_means)
+    
+    unique_items = df_agg[food_item_col].unique()
+    final_variance_base = np.var(y_full)
+
+    # --- 2. LOOCV-Style Prediction and Metric Aggregation ---
+    
+    all_actuals_agg = []
+    all_predictions_agg = []
+    food_item_labels = []
+    
+    # NEW METRIC STORAGE
+    item_mse_list = []
+    all_model_coefficients = defaultdict(list)
+    
+    for item_index, item_value in enumerate(unique_items):
+        test_mask = df_agg[food_item_col] == item_value
+        
+        X_train = X_full[~test_mask]
+        y_train = y_full[~test_mask]
+        X_test = X_full[test_mask]
+        y_test = y_full[test_mask] 
+
+        if X_train.empty or X_test.empty or y_test.empty:
+            continue
+            
+        stable_predictors = [col for col in ingredient_cols if X_train[col].nunique() > 1]
+        
+        # --- Stepwise Selection (omitted for brevity, assumes successful feature selection) ---
+        selected_features = []
+        remaining = list(stable_predictors)
+        best_score = float("inf")
+        
+        while True:
+            scores_to_add = []
+            scores_to_remove = []
+            
+            # Forward Step
+            for candidate in remaining:
+                try:
+                    features = selected_features + [candidate]
+                    model_try = sm.OLS(y_train, sm.add_constant(X_train[features], has_constant="add")).fit()
+                    scores_to_add.append((model_try.aic, candidate))
+                except (np.linalg.LinAlgError, Exception): continue
+
+            # Backward Step
+            if selected_features:
+                for candidate in selected_features:
+                    try:
+                        features = [f for f in selected_features if f != candidate]
+                        model_try = sm.OLS(y_train, sm.add_constant(X_train[features], has_constant="add")).fit()
+                        scores_to_remove.append((model_try.aic, candidate))
+                    except (np.linalg.LinAlgError, Exception): continue
+
+            best_forward = min(scores_to_add) if scores_to_add else (float("inf"), None)
+            best_backward = min(scores_to_remove) if scores_to_remove else (float("inf"), None)
+            current_best_score = min(best_forward[0], best_backward[0])
+            
+            if current_best_score < best_score:
+                if current_best_score == best_forward[0]:
+                    best_candidate = best_forward[1]
+                    selected_features.append(best_candidate)
+                    if best_candidate in remaining: remaining.remove(best_candidate)
+                else:
+                    best_candidate = best_backward[1]
+                    selected_features.remove(best_candidate)
+                    remaining.append(best_candidate)
+                best_score = current_best_score
+            else:
+                break
+        
+        # --- Final Prediction and Metric Extraction ---
+        
+        predicted_cost = y_train.mean() # Default to mean if no features selected
+        
+        if selected_features:
+            try:
+                final_model = sm.OLS(y_train, sm.add_constant(X_train[selected_features], has_constant="add")).fit()
+                
+                # STORE COEFFICIENTS (NEW)
+                for feature in stable_predictors:
+                    if feature in final_model.params:
+                        all_model_coefficients[feature].append(final_model.params[feature])
+                    else:
+                        all_model_coefficients[feature].append(0.0) # Store 0 if feature not selected
+                
+                X_test_aligned = sm.add_constant(X_test[selected_features], has_constant="add")
+                X_test_aligned = X_test_aligned.reindex(columns=final_model.model.exog_names, fill_value=0.0).astype(float)
+                
+                preds = final_model.predict(X_test_aligned)
+                predicted_cost = preds.iloc[0] # Single predicted value
+                
+            except Exception:
+                predicted_cost = y_train.mean() 
+                # Store 0 for coefficients if model failed
+                for feature in stable_predictors:
+                    all_model_coefficients[feature].append(0.0)
+        else:
+             # Store 0 for coefficients if no features selected
+             for feature in stable_predictors:
+                 all_model_coefficients[feature].append(0.0)
+
+        actual_cost = y_test.iloc[0]
+        
+        all_actuals_agg.append(actual_cost)
+        all_predictions_agg.append(predicted_cost)
+        food_item_labels.append(item_value)
+        
+        # Calculate Item-specific MSE (NEW)
+        item_mse = mean_squared_error([actual_cost], [predicted_cost])
+        item_mse_list.append({'Item': item_value, 'MSE': item_mse})
+
+    # Convert lists to NumPy arrays for final metric calculation
+    actual_array = np.array(all_actuals_agg)
+    pred_array = np.array(all_predictions_agg)
+    
+    if actual_array.size == 0:
+        return jsonify({"error": "Prediction completed successfully, but no valid data points were produced for metrics."}), 400
+
+    # --- 3. Aggregate Metrics ---
+    final_mse = mean_squared_error(actual_array, pred_array)
+    final_variance = final_variance_base
+    final_explained_variance = 1 - (final_mse / final_variance) if final_variance != 0 else 0.0
+
+    # --- 4. Coefficient and Plot Data Preparation ---
+    
+    # 4a. Average Coefficients Table (NEW)
+    avg_coefficients = {}
+    for feature in stable_predictors:
+        avg_coefficients[feature] = np.mean(all_model_coefficients[feature])
+        
+    coefficient_table = []
+    for norm_name, avg_coeff in avg_coefficients.items():
+        # Look up display name (e.g., braisedbeefusedg -> Braised Beef)
+        display_name = INGREDIENT_DISPLAY_MAP.get(norm_name, norm_name.replace('g', '').capitalize())
+        coefficient_table.append({
+            'Ingredient': display_name,
+            'Coefficient': avg_coeff
+        })
+
+    # Sort coefficient table by Coefficient value (descending)
+    coefficient_table.sort(key=lambda x: x['Coefficient'], reverse=True)
+
+    # 4b. Plot Data (Side-by-Side Bar Chart sorted by Item MSE)
+    
+    # Combine item data with MSE
+    plot_data_full = pd.DataFrame({
+        'Food Item': food_item_labels,
+        'Actual Cost': actual_array,
+        'Predicted Cost': pred_array,
+        'Item_MSE': [d['MSE'] for d in item_mse_list]
+    })
+    
+    # Sort the items by their individual MSE (ASCENDING)
+    plot_data_full = plot_data_full.sort_values(by='Item_MSE', ascending=False)
+    item_order_by_mse = plot_data_full['Food Item'].tolist()
+    
+    # Reshape for Seaborn plotting
+    plot_df = pd.melt(plot_data_full, id_vars=['Food Item'], value_vars=['Actual Cost', 'Predicted Cost'], 
+                      var_name='Cost Type', value_name='Cost Value')
+    
+    # --- 5. Plotting (Side-by-Side Bar Chart sorted by Item MSE) ---
+    
+    plt.figure(figsize=(14, 7))
+    sns.barplot(
+        data=plot_df, 
+        x='Food Item', 
+        y='Cost Value', 
+        hue='Cost Type', 
+        order=item_order_by_mse, # <-- SORT BY MSE
+    )
+    
+    plt.title("Actual vs. Predicted Cost by Food Item", fontsize=14)
+    plt.xlabel("Food Item", fontsize=12)
+    plt.ylabel("Cost", fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+    plt.legend(title='Cost Type')
+    plt.grid(axis='y', linestyle='--', alpha=0.6)
+    plt.tight_layout()
+
+    # Encoding plot to base64
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+    buf.close()
+    plt.close("all")
+
+    # --- 6. Final Response ---
+    
+    return jsonify({
+        "mse": final_mse,
+        "variance": final_variance,
+        "explained_variance": final_explained_variance,
+        "image": img_b64,
+        "note": "Cost prediction completed",
+        "coefficient_table": coefficient_table # <-- NEW TABLE DATA
+    })
+
 
 def normalize_text(s):
     """Normalizes text by removing non-alphanumeric chars and converting to lowercase."""
