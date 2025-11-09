@@ -11,11 +11,11 @@ import statsmodels.api as sm
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, accuracy_score, precision_score, recall_score, explained_variance_score
-from datetime import datetime, date
 import numpy as np
 import os
 import io
 import base64
+import traceback
 from collections import Counter
 from collections import defaultdict
 
@@ -593,7 +593,7 @@ HTML_TEMPLATE = """
             <div>
                 <h2>Cost Prediction</h2>
                 <p>
-                    Metrics displayed are aggregated across all predicted data points.
+                    Predicts cost of food items based on ingredients used. Calculates the effect of ingredients on cost of food item.
                 </p>
 
                 <button 
@@ -2007,7 +2007,7 @@ def predict_cost_loocv():
     
     # --- 5. Plotting (Side-by-Side Bar Chart sorted by Item MSE) ---
     
-    plt.figure(figsize=(14, 7))
+    plt.figure(figsize=(20, 10))
     sns.barplot(
         data=plot_df, 
         x='Food Item', 
@@ -2016,10 +2016,10 @@ def predict_cost_loocv():
         order=item_order_by_mse, # <-- SORT BY MSE
     )
     
-    plt.title("Actual vs. Predicted Cost by Food Item", fontsize=14)
-    plt.xlabel("Food Item", fontsize=12)
-    plt.ylabel("Cost", fontsize=12)
-    plt.xticks(rotation=45, ha='right')
+    plt.title("Actual vs. Predicted Cost by Food Item", fontsize=20)
+    plt.xlabel("Food Item", fontsize=18)
+    plt.ylabel("Cost", fontsize=18)
+    plt.xticks(rotation=45, ha='right', fontsize=15)
     plt.legend(title='Cost Type')
     plt.grid(axis='y', linestyle='--', alpha=0.6)
     plt.tight_layout()
@@ -2293,12 +2293,6 @@ def get_ingredient_list():
 
 @app.route("/used_shipped_timeline_plot", methods=["POST"])
 def used_shipped_timeline_plot():
-    import re, io, base64, traceback
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    import numpy as np 
-    from flask import jsonify
-
     global item, ship
 
     try:
@@ -2318,17 +2312,16 @@ def used_shipped_timeline_plot():
             s = re.sub(r"[^a-z]+", "", s)
             return s
 
-        # Find the correct column name for the total shipment amount
-        # Check for 'total' (as shown in your output) or the common alternative 'Quantity per month'
+        # Find correct column for total shipment amount
         SHIPMENT_AMOUNT_COL = None
         if 'total' in ship.columns:
             SHIPMENT_AMOUNT_COL = 'total'
         elif 'Quantity per month' in ship.columns:
             SHIPMENT_AMOUNT_COL = 'Quantity per month'
         else:
-             raise KeyError("Ship dataset missing the required total shipment column ('total' or 'Quantity per month'). Cannot compute total shipped.")
+            raise KeyError("Ship dataset missing required total shipment column ('total' or 'Quantity per month').")
 
-        # --- Conversion and mapping (omitted for brevity, remains the same) ---
+        # --- Conversion and mapping ---
         INGREDIENT_CONVERSION_MAP = {
             "braisedbeefusedg": "beef", "braisedchickeng": "chicken", "eggcount": "egg",
             "riceg": "rice", "ramencount": "ramen", "ricenoodlesg": "ricenoodles", 
@@ -2352,30 +2345,25 @@ def used_shipped_timeline_plot():
         for k, v in INGREDIENT_CONVERSION_MAP.items():
             ship_to_item_map.setdefault(v, []).append(k)
 
-        # --- 1. Calculate Monthly Shipped Total (Shipped value is constant per month) ---
+        # --- 1. Monthly Shipped Total ---
         ship_temp = ship.copy()
         if "Ingredient" not in ship_temp.columns:
-             raise KeyError("Ship dataset is missing the 'Ingredient' column.")
-            
+            raise KeyError("Ship dataset missing 'Ingredient' column.")
 
         ship_temp["normalized_ingredient"] = ship_temp["Ingredient"].astype(str).apply(normalize_text)
         filtered_ship = ship_temp[ship_temp["normalized_ingredient"] == normalized_target]
-        
-        # Calculate the single monthly total shipment for the ingredient
         monthly_shipment_total = pd.to_numeric(filtered_ship[SHIPMENT_AMOUNT_COL], errors='coerce').fillna(0).sum()
         
-        # --- 2. Compute "Used" values per month from item data ---
+        # --- 2. Used values per month ---
         item_temp = item.copy()
         item_temp.columns = item_temp.columns.map(normalize_text)
-
         if "month" not in item_temp.columns or "monthnumerical" not in item_temp.columns:
-             raise KeyError("Item dataset missing 'month' or 'monthnumerical' column.")
+            raise KeyError("Item dataset missing 'month' or 'monthnumerical' column.")
 
         used_per_month = []
         related_item_cols = ship_to_item_map.get(normalized_target, [])
-
         if not related_item_cols:
-             raise ValueError(f"No matching columns found in item dataset for ingredient '{selected_ingredient}'.")
+            raise ValueError(f"No matching columns found in item dataset for ingredient '{selected_ingredient}'.")
 
         for name, group in item_temp.groupby(["month", "monthnumerical"]):
             month_name, month_num = name
@@ -2390,30 +2378,29 @@ def used_shipped_timeline_plot():
             used_per_month.append({"month": month_name, "monthnumerical": month_num, "Used": used_sum})
 
         used_df = pd.DataFrame(used_per_month)
-        
-        # --- 3. Final Assembly and Plotting Data (Replaced Merge) ---
-        
-        # Add the constant monthly shipment total to every row of the used data
         used_df['Shipped'] = monthly_shipment_total
-        
-        # Sort by month numerical for correct timeline plot order
         merged = used_df.sort_values("monthnumerical").copy()
-
         if merged.empty:
             raise ValueError(f"No data found for ingredient: {selected_ingredient}.")
 
+        # --- 3. Determine Y-axis label ---
+        # If normalized ingredient is in UNIT_CONVERSION_REQUIRED → "lbs", else "pieces"
+        if any(col in UNIT_CONVERSION_REQUIRED for col in related_item_cols):
+            unit_label = "lbs"
+        else:
+            unit_label = "pieces"
+
+        y_label = f"Amount ({unit_label})"  # dynamic true units
+
         # --- 4. Plot ---
         plt.figure(figsize=(12, 6))
-        
-        # Ensure plot columns are in the desired order
         merged_plot = merged[["month", "Used", "Shipped"]]
-        
         plt.plot(merged_plot["month"], merged_plot["Used"], marker="o", label="Used")
         plt.plot(merged_plot["month"], merged_plot["Shipped"], marker="s", label="Shipped")
-        
+
         plt.title(f"Used vs Shipped Over Time: {selected_ingredient}")
         plt.xlabel("Month")
-        plt.ylabel("Amount (lbs or units)")
+        plt.ylabel(y_label)
         plt.legend()
         plt.grid(True, linestyle="--", alpha=0.5)
         plt.tight_layout()
@@ -2426,12 +2413,9 @@ def used_shipped_timeline_plot():
         plt.close("all")
 
         # --- 5. Table Data ---
-        
-        # Rename 'Shipped' column and format numbers
         table_data = merged[["month", "Used", "Shipped"]].copy()
         table_data["Used"] = table_data["Used"].round(2)
         table_data["Shipped"] = table_data["Shipped"].round(2)
-        
         table_records = table_data.to_dict("records")
 
         return jsonify({
@@ -2441,13 +2425,9 @@ def used_shipped_timeline_plot():
         })
 
     except Exception as e:
-        # Log full traceback to the console for debugging
         print("ERROR in /used_shipped_timeline_plot:", traceback.format_exc())
+        raise  # <— will cause Flask to throw a real exception, not just JSON
 
-        # Return clean JSON error message
-        return jsonify({
-            "error": f"An error occurred: {str(e)}"
-        }), 500
 
 
 @app.route("/bestsellers_plot", methods=["POST"])
