@@ -496,7 +496,8 @@ HTML_TEMPLATE = """
         const [imgUrl, setImgUrl] = React.useState("");
         const [note, setNote] = React.useState("");
         const [loading, setLoading] = React.useState(false);
-        const [tableData, setTableData] = React.useState([]); // NEW STATE
+        const [tableData, setTableData] = React.useState([]);
+        const [actionTableData, setActionTableData] = React.useState([]);
 
         // Fetch unique months for the dropdown on component load (unchanged)
         React.useEffect(() => {
@@ -513,11 +514,11 @@ HTML_TEMPLATE = """
                 setNote("Please select a month.");
                 return;
             }
-
             setLoading(true);
             setImgUrl("");
             setNote("");
             setTableData([]); // Reset table data
+            setActionTableData([]); // Make sure to reset this as well
 
             try {
                 const response = await fetch("/shipment_vs_usage_plot", {
@@ -538,11 +539,12 @@ HTML_TEMPLATE = """
                     setNote("Error: " + data.error);
                     return;
                 }
-                
+
                 if (data.image) {
                     setImgUrl("data:image/png;base64," + data.image);
                     setNote(data.note || "Chart generated successfully.");
-                    setTableData(data.table_data || []); // SAVE NEW TABLE DATA
+                    setTableData(data.table_data || []); 
+                    setActionTableData(data.action_table_data || []); // <--- THIS LINE WAS MISSING AND IS THE FIX
                 }
 
             } catch (e) {
@@ -557,7 +559,6 @@ HTML_TEMPLATE = """
             <div>
                 <h2>Shipment vs. Usage Analysis</h2>
                 <p>There is a large difference between the "Used" and "Shipped" values due to lack of ingredient data for most menu items.</p>
-                <br /><br />
 
                 {/* ... (Month selection and button: unchanged) ... */}
 
@@ -622,9 +623,32 @@ HTML_TEMPLATE = """
                         </table>
                     </div>
                 )}
+                {actionTableData.length > 0 && (
+                    <div style={{ marginTop: 40, width: '100%' }}>
+                        <h3>Inventory Action Recommendations </h3>
+                        <table style={{ borderCollapse: 'collapse', width: '100%', border: '1px solid #ddd' }}>
+                            <thead>
+                                <tr style={{ backgroundColor: '#fff8e1' }}>
+                                    <th style={{ border: '1px solid #ddd', padding: '8px', width: '50%' }}>Order Less</th>
+                                    <th style={{ border: '1px solid #ddd', padding: '8px', width: '50%' }}>Order More</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {actionTableData.map((row, index) => (
+                                    <tr key={index}>
+                                        <td style={{ border: '1px solid #ddd', padding: '8px', color: row['Order Less'] ? 'black' : 'inherit' }}>{row['Order Less']}</td>
+                                        <td style={{ border: '1px solid #ddd', padding: '8px', color: row['Order More'] ? 'black' : 'inherit' }}>{row['Order More']}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
         );
     };
+    
+    
     
     // Used/Shipped Timeline Tab
     const UsedShippedTimeline = () => {
@@ -1415,12 +1439,12 @@ def get_unique_months():
         return jsonify({"error": str(e)}), 500
 
 
-# Assuming imports are at the top (pd, np, plt, io, base64, re, jsonify)
-# Assuming LB_TO_GRAM is defined as 453.592
+
+
 
 @app.route("/shipment_vs_usage_plot", methods=["POST"])
 def shipment_vs_usage_plot():
-    global item, ship # Use global item and ship DataFrames
+    global item, ship 
 
     if item is None or item.empty or ship is None or ship.empty:
         return jsonify({"error": "Item or Ship data not loaded."}), 400
@@ -1430,6 +1454,10 @@ def shipment_vs_usage_plot():
 
     if not selected_month:
         return jsonify({"error": "Month selection is required."}), 400
+
+    # Assuming normalize_text, INGREDIENT_CONVERSION_MAP, UNIT_CONVERSION_REQUIRED, and LB_TO_GRAM are defined
+
+    # ... (Omitted Data Setup and Processing Sections 1, 2, and 3 - they remain the same) ...
 
     # The conversion map (normalized item ingredient : normalized ship ingredient)
     INGREDIENT_CONVERSION_MAP = {
@@ -1449,52 +1477,47 @@ def shipment_vs_usage_plot():
         "bokchoyg": "bokchoy", 
         "tapiocastarch": "tapiocastarch"
     }
-
-    # Normalized list of target ingredient columns in the item dataset
     ITEM_TARGETS_NORMALIZED = list(INGREDIENT_CONVERSION_MAP.keys())
-    
-    # Unit conversion flags (1 if conversion from g to lbs is needed, 0 otherwise)
     UNIT_CONVERSION_REQUIRED = {
         "braisedbeefusedg": 1, "braisedchickeng": 1, "riceg": 1, 
-        "ricenoodlesg": 1, "flourg": 1, "peasg": 1, "carrotg": 1, # Including carrotg per context
+        "ricenoodlesg": 1, "flourg": 1, "peasg": 1, "carrotg": 1, 
         "bokchoyg": 1, "greenonion":1, "cilantro":1,
     }
-    
-    # --- 1. Process ITEM (Usage) Data (omitted for brevity, unchanged) ---
-    # ... (code for item_temp, filtering, and usage_sums remains the same) ...
+    LB_TO_GRAM = 453.592
+
+    # Helper function needed inside the route for mapping/processing (assuming it was defined externally)
+    def normalize_text(s):
+        s = str(s).strip().lower()
+        s = re.sub(r"[^a-z]+$", "", s)
+        s = re.sub(r"[^a-z]+", "", s)
+        return s
+
+    # --- 1. Compute usage per ingredient (Replicating logic to define necessary variables) ---
     item_temp = item.copy()
     item_temp.columns = item_temp.columns.map(normalize_text)
     month_filter = item_temp['month'].astype(str).str.strip() == selected_month.strip()
     filtered_item_df = item_temp[month_filter]
-
-    if filtered_item_df.empty:
-        return jsonify({"error": f"No usage data found for the month: {selected_month}."}), 400
-
-    # --- 1. Compute usage per ingredient ---
+    
     usage_sums = {}
     item_col_to_display_name = {}
 
     for item_col in ITEM_TARGETS_NORMALIZED:
         if item_col in filtered_item_df.columns:
-            # Get sum for this specific ingredient column
-            value = (pd.to_numeric(filtered_item_df[item_col], errors='coerce').fillna(0) * filtered_item_df['count']).sum()
+            # Assuming 'count' is available and numeric
+            count_multiplier = pd.to_numeric(filtered_item_df['count'], errors='coerce').fillna(1)
+            raw_usage = pd.to_numeric(filtered_item_df[item_col], errors='coerce').fillna(0)
+            value = (raw_usage * count_multiplier).sum()
 
-            # Convert grams to pounds if necessary
             if UNIT_CONVERSION_REQUIRED.get(item_col, 0) == 1 and value != 0:
                 value /= LB_TO_GRAM
 
             usage_sums[item_col] = value
-
-            # Optional: assign human-friendly display name (e.g., Beef, Chicken, etc.)
             mapped_ship_ingredient = INGREDIENT_CONVERSION_MAP.get(item_col, item_col)
             item_col_to_display_name[item_col] = mapped_ship_ingredient.capitalize()
-
-
-    # --- 2. Process SHIPMENT Data (omitted for brevity, largely unchanged) ---
-
+    
+    # --- 2. Process SHIPMENT Data (Replicating logic) ---
     ship_temp = ship.copy()
     ship_temp['normalized_ingredient'] = ship_temp['Ingredient'].astype(str).apply(normalize_text)
-
     shipment_total = {}
     ship_to_item_map = {}
     for k, v in INGREDIENT_CONVERSION_MAP.items():
@@ -1504,10 +1527,8 @@ def shipment_vs_usage_plot():
         ship_rows = ship_temp[ship_temp['normalized_ingredient'] == ship_ing_normalized]
         
         if not ship_rows.empty:
-            # FIX: total_shipment_amount column name correction
             # Assuming 'total' is the correct column name here
             total_shipment_amount = pd.to_numeric(ship_rows['total'], errors='coerce').fillna(0).sum()
-            
             original_display_name = ship_rows['Ingredient'].iloc[0]
             
             for item_col in ship_to_item_map[ship_ing_normalized]:
@@ -1518,31 +1539,66 @@ def shipment_vs_usage_plot():
                 shipment_total[item_col] = 0
                 item_col_to_display_name[item_col] = ship_ing_normalized.capitalize()
 
-
-    # --- 3. Final Data Assembly and Plotting ---
+    # --- 3. Final Data Assembly ---
 
     final_data = []
+    
+    # NEW LISTS FOR INVENTORY ACTIONS
+    order_less_list = []
+    order_more_list = []
+
     for item_col in ITEM_TARGETS_NORMALIZED:
+        used_val = usage_sums.get(item_col, 0)
+        shipped_val = shipment_total.get(item_col, 0)
+        display_name = item_col_to_display_name.get(item_col, item_col)
+
         if item_col in usage_sums:
             final_data.append({
-                'Ingredient': item_col_to_display_name.get(item_col, item_col),
+                'Ingredient': display_name,
                 'Units': 'Pounds' if UNIT_CONVERSION_REQUIRED.get(item_col, 0) == 1 else 'Pieces',
-                'Used': usage_sums.get(item_col, 0),
-                'Shipped': shipment_total.get(item_col, 0)
+                'Used': used_val,
+                'Shipped': shipped_val
             })
+            
+            # --- Inventory Action Logic (NEW) ---
+            if shipped_val > 0:
+                if used_val < (0.5 * shipped_val):
+                    order_less_list.append(display_name)
+                elif used_val > shipped_val:
+                    order_more_list.append(display_name)
+
 
     if not final_data:
         return jsonify({"error": "No data found after filtering and mapping ingredients."}), 400
 
     plot_df = pd.DataFrame(final_data).set_index('Ingredient')
     
-    # 4. PREPARE TABULAR DATA (NEW)
-    # Convert the plot_df index (Ingredient) to a column, format numbers, and convert to records
+    # 4. PREPARE TABULAR DATA 
     table_df = plot_df.reset_index()
+    # Ensure 'Units' is converted from plot_df index back to a column for the table
+    # Since plot_df drops 'Units', we must add it back manually from final_data or just use final_data directly
+    # To keep table_df aligned with plotting, we'll re-merge the 'Units' data.
+    unit_lookup = {d['Ingredient']: d['Units'] for d in final_data}
+    table_df['Units'] = table_df['Ingredient'].map(unit_lookup)
+    
     table_df['Used'] = table_df['Used'].round(2)
     table_df['Shipped'] = table_df['Shipped'].round(2)
     
-    table_data = table_df.to_dict('records') # [{'Ingredient': 'Beef', 'Used': 100.50, 'Shipped': 500.00}, ...]
+    table_data = table_df[['Ingredient', 'Units', 'Used', 'Shipped']].to_dict('records')
+
+
+    # Prepare the Order Table data structure
+    # We need a list of dictionaries where keys are 'Order Less' and 'Order More'
+    # To make a clean 2-column table with uneven lists, we pad the shorter list with empty strings.
+    max_len = max(len(order_less_list), len(order_more_list))
+    
+    order_less_padded = order_less_list + [''] * (max_len - len(order_less_list))
+    order_more_padded = order_more_list + [''] * (max_len - len(order_more_list))
+    
+    action_table_data = [
+        {'Order Less': ol, 'Order More': om} 
+        for ol, om in zip(order_less_padded, order_more_padded)
+    ]
 
 
     # Plotting (unchanged)
@@ -1569,7 +1625,8 @@ def shipment_vs_usage_plot():
     return jsonify({
         "image": img_b64,
         "note": f"Chart generated for {selected_month}.",
-        "table_data": table_data # NEW DATA FIELD
+        "table_data": table_data,         # Existing table
+        "action_table_data": action_table_data # NEW table data
     })
 
 
